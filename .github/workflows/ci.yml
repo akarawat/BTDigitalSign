@@ -1,0 +1,38 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET 8
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Restore dependencies
+      run: dotnet restore BTDigitalSign.sln
+
+    - name: Build
+      run: dotnet build BTDigitalSign.sln --no-restore --configuration Release
+
+    - name: Run Tests
+      run: dotnet test BTDigitalSign.sln --no-build --configuration Release --verbosity normal
+
+    - name: Publish API
+      run: dotnet publish src/DigitalSign.API/DigitalSign.API.csproj -c Release -o ./publish --no-build
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: btdigitalsign-api
+        path: ./publish
+        retention-days: 7
