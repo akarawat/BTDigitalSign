@@ -1,12 +1,12 @@
 using DigitalSign.Core.Models;
-using iText.Bouncycastle.Crypto;        // PrivateKeyBC  ← ชื่อที่ถูกต้อง
+using iText.Bouncycastle.Crypto;        // PrivateKeyBC  (iText.Bouncycastle.Crypto namespace)
 using iText.Bouncycastle.X509;         // X509CertificateBC
-using iText.Commons.Bouncycastle.Cert; // IX509Certificate
+using iText.Commons.Bouncycastle.Cert; // IX509Certificate (interface)
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
 using iText.Signatures;
 using Microsoft.Extensions.Logging;
-using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Security;       // DotNetUtilities
 
 namespace DigitalSign.Core.Services;
 
@@ -27,18 +27,22 @@ public class PdfSignService : IPdfSignService
         _logger      = logger;
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Sign PDF
+    // ─────────────────────────────────────────────────────────────────────────
     public async Task<PdfSignResult> SignPdfAsync(PdfSignRequest request, string signerUsername)
     {
         try
         {
-            var pdfBytes   = Convert.FromBase64String(request.PdfBase64);
-            var cert       = _certService.GetSigningCertificate(request.CertThumbprint);
+            var pdfBytes = Convert.FromBase64String(request.PdfBase64);
+            var cert     = _certService.GetSigningCertificate(request.CertThumbprint);
 
-            // แปลง .NET X509Certificate2 → BouncyCastle
+            // .NET X509Certificate2 → BouncyCastle AsymmetricKeyParameter
             var bcCert     = DotNetUtilities.FromX509Certificate(cert);
             var privateKey = DotNetUtilities.GetKeyPair(cert.GetRSAPrivateKey()!).Private;
+            // AsymmetricKeyParameter implements ICipherParameters → PrivateKeyBC รับได้ทันที
 
-            // PrivateKeyBC รับ ICipherParameters (AsymmetricKeyParameter implement ICipherParameters อยู่แล้ว)
+            // PrivateKeyBC อยู่ใน namespace iText.Bouncycastle.Crypto (verified จาก iText7 8.0.0 source)
             IExternalSignature pks   = new PrivateKeySignature(new PrivateKeyBC(privateKey), DigestAlgorithms.SHA256);
             IX509Certificate[] chain = [new X509CertificateBC(bcCert)];
 
@@ -48,7 +52,6 @@ public class PdfSignService : IPdfSignService
             var reader = new PdfReader(inputMs);
             var signer = new PdfSigner(reader, outputMs, new StampingProperties().UseAppendMode());
 
-            // กำหนดรูปแบบ signature ที่แสดงบนหน้า PDF
             var appearance = signer.GetSignatureAppearance();
             appearance
                 .SetReason(request.Reason)
@@ -62,11 +65,7 @@ public class PdfSignService : IPdfSignService
 
             signer.SetFieldName($"Sig_{request.ReferenceId}_{DateTime.UtcNow:yyyyMMddHHmmss}");
             signer.SetCertificationLevel(PdfSigner.NOT_CERTIFIED);
-
-            // ฝัง Digital Signature แบบ CMS
             signer.SignDetached(pks, chain, null, null, null, 0, PdfSigner.CryptoStandard.CMS);
-
-            var signedBytes = outputMs.ToArray();
 
             _logger.LogInformation("PDF signed. Doc={Doc}, Ref={Ref}, By={User}",
                 request.DocumentName, request.ReferenceId, signerUsername);
@@ -74,7 +73,7 @@ public class PdfSignService : IPdfSignService
             return await Task.FromResult(new PdfSignResult
             {
                 IsSuccess    = true,
-                PdfBase64    = Convert.ToBase64String(signedBytes),
+                PdfBase64    = Convert.ToBase64String(outputMs.ToArray()),
                 DocumentName = request.DocumentName,
                 ReferenceId  = request.ReferenceId,
                 SignedBy     = cert.Subject,
@@ -93,6 +92,9 @@ public class PdfSignService : IPdfSignService
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Verify PDF
+    // ─────────────────────────────────────────────────────────────────────────
     public async Task<VerifyResult> VerifyPdfSignatureAsync(string pdfBase64)
     {
         try
@@ -118,9 +120,9 @@ public class PdfSignService : IPdfSignService
             var  pkcs7    = signUtil.ReadSignatureData(sigName);
             bool sigValid = pkcs7.VerifySignatureIntegrityAndAuthenticity();
 
-            // IX509Certificate ไม่มี property NotAfter / method IsValid() โดยตรง
-            // ต้อง cast → X509CertificateBC แล้ว .GetCertificate()
-            // เพื่อได้ Org.BouncyCastle.X509.X509Certificate ซึ่งมี .NotAfter, .IsValid(), .SubjectDN
+            // IX509Certificate ไม่มี NotAfter / IsValid / SubjectDN โดยตรง
+            // → cast เป็น X509CertificateBC แล้วดึง Org.BouncyCastle.X509.X509Certificate
+            //   ซึ่งมี .NotAfter (property), .IsValid(DateTime), .SubjectDN (property)
             var signerCertI = pkcs7.GetSigningCertificate();
             var bcX509      = ((X509CertificateBC)signerCertI).GetCertificate();
 
@@ -129,7 +131,7 @@ public class PdfSignService : IPdfSignService
             var  signedBy   = bcX509.SubjectDN.ToString();
 
             _logger.LogInformation(
-                "PDF verify: SigName={Name}, SigValid={SigValid}, CertValid={CertValid}, By={By}",
+                "PDF verify: Sig={Name}, SigOK={SigValid}, CertOK={CertValid}, By={By}",
                 sigName, sigValid, certValid, signedBy);
 
             return await Task.FromResult(new VerifyResult
