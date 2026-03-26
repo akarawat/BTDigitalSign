@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DigitalSign.API/DigitalSign.API.csproj" />
+    <Project Path="src/DigitalSign.Core/DigitalSign.Core.csproj" />
+    <Project Path="src/DigitalSign.Data/DigitalSign.Data.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DigitalSign.Tests/DigitalSign.Tests.csproj" />
+  </Folder>
+</Solution>
