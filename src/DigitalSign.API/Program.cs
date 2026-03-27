@@ -1,18 +1,19 @@
 using DigitalSign.Core.Services;
 using DigitalSign.Data;
 using DigitalSign.Data.Repositories;
+using iText.Bouncycastle;          // BouncyCastleFactory — from itext7.bouncy-castle-adapter (in Core)
+using iText.Commons.Bouncycastle;  // BouncyCastleFactoryCreator
 using Microsoft.AspNetCore.Authentication.Negotiate;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Serilog;
 
-// ── Force โหลด iText7 bouncy-castle-connector ────────────────────────────────
-// การอ้างถึง Type บังคับให้ assembly โหลดทันที
-// connector มี ModuleInitializer ที่ register BouncyCastleFactory อัตโนมัติ
-// ถ้าไม่ทำนี้ assembly จะโหลด lazy และ factory ไม่ถูก register ก่อน sign
-var connectorType = typeof(iText.Bouncycastleconnector.BouncyCastleFactoryCreator);
-System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(connectorType.TypeHandle);
+// ── Force โหลด iText7 BouncyCastle Factory ───────────────────────────────────
+// ใช้ adapter (itext7.bouncy-castle-adapter) ที่อยู่ใน DigitalSign.Core แล้ว
+// RunClassConstructor บังคับให้ static constructor ทำงาน → register factory
+var adapterType = typeof(BouncyCastleFactory);
+System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(adapterType.TypeHandle);
+//BouncyCastleFactoryCreator.SetFactory(new BouncyCastleFactory());
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,12 +31,11 @@ builder.Host.UseSerilog();
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
     .AddNegotiate();
 
-builder.Services.AddAuthorization(options =>
-{
-    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+// ใช้ AddAuthorizationBuilder (แนะนำสำหรับ .NET 8)
+builder.Services.AddAuthorizationBuilder()
+    .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
-        .Build();
-});
+        .Build());
 
 // ── Database ──────────────────────────────────────────────────────────────────
 builder.Services.AddDbContext<DigitalSignDbContext>(opts =>
@@ -62,7 +62,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// ── CORS ──────────────────────────────────────────────────────────────────────
+// ── CORS (Intranet) ───────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("IntranetPolicy", policy =>
@@ -75,6 +75,7 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// ── Middleware Pipeline ───────────────────────────────────────────────────────
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -92,6 +93,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
+// Auto-migrate on startup
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<DigitalSignDbContext>();

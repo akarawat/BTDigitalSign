@@ -1,5 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
-
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -10,10 +9,6 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="8.0.0" />
-
-    <!-- itext7.bouncy-castle-connector auto-registers BouncyCastleFactory on assembly load -->
-    <PackageReference Include="itext7.bouncy-castle-connector" Version="8.0.0" />
-
     <PackageReference Include="Swashbuckle.AspNetCore"  Version="6.5.0" />
     <PackageReference Include="Serilog.AspNetCore"      Version="8.0.0" />
     <PackageReference Include="Serilog.Sinks.Console"   Version="5.0.0" />
@@ -24,5 +19,4 @@
     <ProjectReference Include="..\DigitalSign.Core\DigitalSign.Core.csproj" />
     <ProjectReference Include="..\DigitalSign.Data\DigitalSign.Data.csproj" />
   </ItemGroup>
-
 </Project>
