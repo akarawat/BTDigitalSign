@@ -73,3 +73,5 @@ TestResults/
 
 # Publish output
 **/publish/
+/src/DigitalSign.API/appsettings.Development.json
+/src/DigitalSign.API/appsettings.json
