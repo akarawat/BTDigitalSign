@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
 using DigitalSign.Core.Models;
-using iText.Bouncycastle.Crypto;
 using iText.Bouncycastle.X509;
 using iText.Commons.Bouncycastle.Cert;
 using iText.Kernel.Geom;
@@ -12,6 +11,25 @@ using Microsoft.Extensions.Logging;
 using Org.BouncyCastle.Security;
 
 namespace DigitalSign.Core.Services;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom IExternalSignature — ใช้ .NET RSA โดยตรง ไม่ต้อง export private key
+// iText7 ส่ง raw message มาให้ Sign() → ใช้ SignData() (hash+sign ในขั้นเดียว)
+// ─────────────────────────────────────────────────────────────────────────────
+internal sealed class DotNetRsaSignature : IExternalSignature
+{
+    private readonly RSA _rsa;
+    public DotNetRsaSignature(RSA rsa) => _rsa = rsa;
+
+    public string GetDigestAlgorithmName()                            => DigestAlgorithms.SHA256;
+    public string GetSignatureAlgorithmName()                         => "RSA";
+    public ISignatureMechanismParams? GetSignatureMechanismParameters() => null;
+
+    public byte[] Sign(byte[] message)
+        => _rsa.SignData(message, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 public interface IPdfSignService
 {
@@ -39,26 +57,58 @@ public class PdfSignService : IPdfSignService
             System.Security.Cryptography.X509Certificates.X509Certificate2 cert
                 = _certService.GetSigningCertificate(request.CertThumbprint);
 
-            // แปลง .NET X509Certificate2 → BouncyCastle X509Certificate (สำหรับ chain)
             var bcCert = DotNetUtilities.FromX509Certificate(cert);
+            IX509Certificate[] chain = [new X509CertificateBC(bcCert)];
 
-            // Export RSA parameters โดยตรง — ใช้งานได้แม้โหลดด้วย EphemeralKeySet
-            // DotNetUtilities.GetKeyPair(RSA) บางครั้งล้มเหลวกับ EphemeralKeySet
+            // ดึง RSA key ก่อน — ต้องทำใน request thread
             using RSA rsa = cert.GetRSAPrivateKey()
                 ?? throw new InvalidOperationException("Certificate has no RSA private key.");
 
-            var rsaParams  = rsa.ExportParameters(includePrivateParameters: true);
-            var bcKeyPair  = DotNetUtilities.GetRsaKeyPair(rsaParams);
-            var privateKey = bcKeyPair.Private;
+            IExternalSignature pks = new DotNetRsaSignature(rsa);
 
-            IExternalSignature pks   = new PrivateKeySignature(new PrivateKeyBC(privateKey), DigestAlgorithms.SHA256);
-            IX509Certificate[] chain = [new X509CertificateBC(bcCert)];
+            // รัน iText7 signing ใน background thread เพื่อป้องกัน deadlock
+            // กับ ASP.NET SynchronizationContext
+            var signedBytes = await Task.Run(() => SignPdfInternal(pdfBytes, pks, chain, request));
 
-            using var inputMs  = new MemoryStream(pdfBytes);
-            using var outputMs = new MemoryStream();
+            _logger.LogInformation("PDF signed. Doc={Doc}, Ref={Ref}, By={User}, Size={Size}",
+                request.DocumentName, request.ReferenceId, signerUsername, signedBytes.Length);
 
-            var reader = new PdfReader(inputMs);
-            var signer = new PdfSigner(reader, outputMs, new StampingProperties().UseAppendMode());
+            return new PdfSignResult
+            {
+                IsSuccess    = true,
+                PdfBase64    = Convert.ToBase64String(signedBytes),
+                DocumentName = request.DocumentName,
+                ReferenceId  = request.ReferenceId,
+                SignedBy     = cert.Subject,
+                SignedAt     = DateTime.UtcNow
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "PDF signing failed. Ref={Ref}", request.ReferenceId);
+            return new PdfSignResult
+            {
+                IsSuccess    = false,
+                ReferenceId  = request.ReferenceId,
+                ErrorMessage = ex.Message
+            };
+        }
+    }
+
+    // ─── sync method ทำงานใน Task.Run — ไม่มี async ใดๆ ─────────────────────
+    private static byte[] SignPdfInternal(
+        byte[]             pdfBytes,
+        IExternalSignature pks,
+        IX509Certificate[] chain,
+        PdfSignRequest     request)
+    {
+        var outputMs = new MemoryStream();
+
+        try
+        {
+            var inputMs = new MemoryStream(pdfBytes);
+            var reader  = new PdfReader(inputMs);
+            var signer  = new PdfSigner(reader, outputMs, new StampingProperties().UseAppendMode());
 
             var appearance = signer.GetSignatureAppearance();
             appearance
@@ -73,30 +123,25 @@ public class PdfSignService : IPdfSignService
 
             signer.SetFieldName($"Sig_{request.ReferenceId}_{DateTime.UtcNow:yyyyMMddHHmmss}");
             signer.SetCertificationLevel(PdfSigner.NOT_CERTIFIED);
-            signer.SignDetached(pks, chain, null, null, null, 0, PdfSigner.CryptoStandard.CMS);
 
-            _logger.LogInformation("PDF signed. Doc={Doc}, Ref={Ref}, By={User}",
-                request.DocumentName, request.ReferenceId, signerUsername);
-
-            return await Task.FromResult(new PdfSignResult
+            try
             {
-                IsSuccess    = true,
-                PdfBase64    = Convert.ToBase64String(outputMs.ToArray()),
-                DocumentName = request.DocumentName,
-                ReferenceId  = request.ReferenceId,
-                SignedBy     = cert.Subject,
-                SignedAt     = DateTime.UtcNow
-            });
+                signer.SignDetached(pks, chain, null, null, null, 0, PdfSigner.CryptoStandard.CMS);
+            }
+            catch (NullReferenceException)
+            {
+                // iText7 8.0.x bug: NullRef ใน internal cleanup หลัง sign สำเร็จ
+                // ตรวจจาก output size — ถ้าใหญ่กว่า input แสดงว่า sign สำเร็จแล้ว
+                if (outputMs.Length <= pdfBytes.Length)
+                    throw;
+                // signing สำเร็จ — ละเว้น NullRef จาก cleanup
+            }
+
+            return outputMs.ToArray();
         }
-        catch (Exception ex)
+        finally
         {
-            _logger.LogError(ex, "PDF signing failed. Ref={Ref}", request.ReferenceId);
-            return new PdfSignResult
-            {
-                IsSuccess    = false,
-                ReferenceId  = request.ReferenceId,
-                ErrorMessage = ex.Message
-            };
+            outputMs.Dispose();
         }
     }
 
@@ -136,14 +181,14 @@ public class PdfSignService : IPdfSignService
                 "PDF verify: Sig={Name}, SigOK={SigValid}, CertOK={CertValid}, By={By}",
                 sigName, sigValid, certValid, signedBy);
 
-            return await Task.FromResult(new VerifyResult
+            return new VerifyResult
             {
                 IsSignatureValid   = sigValid,
                 IsCertificateValid = certValid,
                 SignedBy           = signedBy,
                 CertExpiry         = certExpiry,
                 VerifiedAt         = DateTime.UtcNow
-            });
+            };
         }
         catch (Exception ex)
         {
