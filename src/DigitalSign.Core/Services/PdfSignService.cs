@@ -1,15 +1,15 @@
-using System.Security.Cryptography;                    // RSA, GetRSAPrivateKey()
-using System.Security.Cryptography.X509Certificates;  // X509Certificate2
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 
 using DigitalSign.Core.Models;
-using iText.Bouncycastle.Crypto;        // PrivateKeyBC
-using iText.Bouncycastle.X509;         // X509CertificateBC
-using iText.Commons.Bouncycastle.Cert; // IX509Certificate
+using iText.Bouncycastle.Crypto;
+using iText.Bouncycastle.X509;
+using iText.Commons.Bouncycastle.Cert;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
 using iText.Signatures;
 using Microsoft.Extensions.Logging;
-using Org.BouncyCastle.Security;       // DotNetUtilities
+using Org.BouncyCastle.Security;
 
 namespace DigitalSign.Core.Services;
 
@@ -30,26 +30,26 @@ public class PdfSignService : IPdfSignService
         _logger      = logger;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Sign PDF
-    // ─────────────────────────────────────────────────────────────────────────
     public async Task<PdfSignResult> SignPdfAsync(PdfSignRequest request, string signerUsername)
     {
         try
         {
             var pdfBytes = Convert.FromBase64String(request.PdfBase64);
 
-            // ระบุ type ชัดเจนเพื่อหลีกเลี่ยง namespace conflict กับ iText.Bouncycastle.X509
             System.Security.Cryptography.X509Certificates.X509Certificate2 cert
                 = _certService.GetSigningCertificate(request.CertThumbprint);
 
-            // .NET X509Certificate2 → BouncyCastle
+            // แปลง .NET X509Certificate2 → BouncyCastle X509Certificate (สำหรับ chain)
             var bcCert = DotNetUtilities.FromX509Certificate(cert);
 
-            // ดึง RSA private key — ต้องมี using System.Security.Cryptography จึงเจอ method นี้
-            using RSA rsa        = cert.GetRSAPrivateKey()
+            // Export RSA parameters โดยตรง — ใช้งานได้แม้โหลดด้วย EphemeralKeySet
+            // DotNetUtilities.GetKeyPair(RSA) บางครั้งล้มเหลวกับ EphemeralKeySet
+            using RSA rsa = cert.GetRSAPrivateKey()
                 ?? throw new InvalidOperationException("Certificate has no RSA private key.");
-            var privateKey       = DotNetUtilities.GetKeyPair(rsa).Private;
+
+            var rsaParams  = rsa.ExportParameters(includePrivateParameters: true);
+            var bcKeyPair  = DotNetUtilities.GetRsaKeyPair(rsaParams);
+            var privateKey = bcKeyPair.Private;
 
             IExternalSignature pks   = new PrivateKeySignature(new PrivateKeyBC(privateKey), DigestAlgorithms.SHA256);
             IX509Certificate[] chain = [new X509CertificateBC(bcCert)];
@@ -100,9 +100,6 @@ public class PdfSignService : IPdfSignService
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Verify PDF
-    // ─────────────────────────────────────────────────────────────────────────
     public async Task<VerifyResult> VerifyPdfSignatureAsync(string pdfBase64)
     {
         try
@@ -128,8 +125,6 @@ public class PdfSignService : IPdfSignService
             var  pkcs7    = signUtil.ReadSignatureData(sigName);
             bool sigValid = pkcs7.VerifySignatureIntegrityAndAuthenticity();
 
-            // cast IX509Certificate → X509CertificateBC → Org.BouncyCastle.X509.X509Certificate
-            // เพื่อเข้าถึง .NotAfter, .IsValid(), .SubjectDN
             var signerCertI = pkcs7.GetSigningCertificate();
             var bcX509      = ((X509CertificateBC)signerCertI).GetCertificate();
 

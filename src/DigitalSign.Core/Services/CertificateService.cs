@@ -9,13 +9,13 @@ public interface ICertificateService
 {
     X509Certificate2 GetSigningCertificate(string? thumbprint = null);
     X509Certificate2 LoadFromPfx(string path, string password);
-    CertificateInfo GetCertificateInfo(string? thumbprint = null);
-    bool IsCertificateValid(X509Certificate2 cert);
+    CertificateInfo  GetCertificateInfo(string? thumbprint = null);
+    bool             IsCertificateValid(X509Certificate2 cert);
 }
 
 public class CertificateService : ICertificateService
 {
-    private readonly IConfiguration _config;
+    private readonly IConfiguration              _config;
     private readonly ILogger<CertificateService> _logger;
 
     public CertificateService(IConfiguration config, ILogger<CertificateService> logger)
@@ -28,13 +28,12 @@ public class CertificateService : ICertificateService
     {
         thumbprint ??= _config["Certificate:Thumbprint"];
 
-        // ── ลำดับที่ 1: โหลดจาก PFX file (Dev / ไม่ต้องการ admin) ────────────
+        // ── ลำดับที่ 1: โหลดจาก PFX file ────────────────────────────────────
         var pfxPath = _config["Certificate:PfxPath"];
 
         if (!string.IsNullOrEmpty(pfxPath))
         {
-            // แปลง relative path → absolute path เทียบกับ working directory จริง
-            // รองรับทั้ง "certs/dev-sign.pfx" และ absolute path
+            // แปลง relative path → absolute เทียบกับ BaseDirectory จริง
             var resolvedPath = Path.IsPathRooted(pfxPath)
                 ? pfxPath
                 : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, pfxPath));
@@ -45,10 +44,10 @@ public class CertificateService : ICertificateService
                 return LoadFromPfx(resolvedPath, _config["Certificate:PfxPassword"] ?? "");
             }
 
-            _logger.LogWarning("PFX file not found at: {Path} (resolved from: {Original})", resolvedPath, pfxPath);
+            _logger.LogWarning("PFX not found: {Path} (resolved: {Original})", resolvedPath, pfxPath);
         }
 
-        // ── ลำดับที่ 2: โหลดจาก Windows Certificate Store (Production) ────────
+        // ── ลำดับที่ 2: โหลดจาก Windows Certificate Store (Production) ──────
         if (string.IsNullOrEmpty(thumbprint))
             throw new InvalidOperationException(
                 "Certificate not found: PfxPath file missing and Thumbprint not configured.");
@@ -84,29 +83,32 @@ public class CertificateService : ICertificateService
         if (!File.Exists(path))
             throw new FileNotFoundException($"PFX file not found: {path}");
 
-        // ใช้ Exportable เท่านั้น — ไม่ใช้ PersistKeySet เพราะต้องการสิทธิ์ Admin
-        // EphemeralKeySet: key อยู่ใน memory ไม่เขียนลง disk → ไม่ต้องการ admin
+        // Exportable       — อนุญาตให้ export private key parameters ออกมาได้
+        //                    จำเป็นสำหรับ PDF signing ด้วย BouncyCastle
+        // UserKeySet       — เก็บ key ใน profile ของ current user
+        //                    ไม่ต้องการสิทธิ์ Admin (ต่างจาก MachineKeySet)
+        //                    ไม่เขียน key ค้างไว้บน disk (ต่างจาก PersistKeySet)
         return new X509Certificate2(
             path,
             password,
-            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.EphemeralKeySet);
+            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.UserKeySet);
     }
 
     public CertificateInfo GetCertificateInfo(string? thumbprint = null)
     {
         var cert = GetSigningCertificate(thumbprint);
-        var rsa = cert.GetRSAPublicKey();
+        var rsa  = cert.GetRSAPublicKey();
 
         return new CertificateInfo
         {
-            Subject = cert.Subject,
-            Thumbprint = cert.Thumbprint,
-            Issuer = cert.Issuer,
-            NotBefore = cert.NotBefore,
-            NotAfter = cert.NotAfter,
-            IsValid = IsCertificateValid(cert),
+            Subject      = cert.Subject,
+            Thumbprint   = cert.Thumbprint,
+            Issuer       = cert.Issuer,
+            NotBefore    = cert.NotBefore,
+            NotAfter     = cert.NotAfter,
+            IsValid      = IsCertificateValid(cert),
             KeyAlgorithm = rsa != null ? "RSA" : "ECDSA",
-            KeySize = rsa?.KeySize ?? 0
+            KeySize      = rsa?.KeySize ?? 0
         };
     }
 
