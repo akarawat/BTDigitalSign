@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Serilog;
 
+_ = iText.Bouncycastleconnector.BouncyCastleFactoryCreator.GetFactory();
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Serilog ───────────────────────────────────────────────────────────────────

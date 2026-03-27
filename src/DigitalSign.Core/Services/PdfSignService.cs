@@ -14,7 +14,6 @@ namespace DigitalSign.Core.Services;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Custom IExternalSignature — ใช้ .NET RSA โดยตรง ไม่ต้อง export private key
-// iText7 ส่ง raw message มาให้ Sign() → ใช้ SignData() (hash+sign ในขั้นเดียว)
 // ─────────────────────────────────────────────────────────────────────────────
 internal sealed class DotNetRsaSignature : IExternalSignature
 {
@@ -60,17 +59,15 @@ public class PdfSignService : IPdfSignService
             var bcCert = DotNetUtilities.FromX509Certificate(cert);
             IX509Certificate[] chain = [new X509CertificateBC(bcCert)];
 
-            // ดึง RSA key ก่อน — ต้องทำใน request thread
             using RSA rsa = cert.GetRSAPrivateKey()
                 ?? throw new InvalidOperationException("Certificate has no RSA private key.");
 
             IExternalSignature pks = new DotNetRsaSignature(rsa);
 
-            // รัน iText7 signing ใน background thread เพื่อป้องกัน deadlock
-            // กับ ASP.NET SynchronizationContext
+            // รัน iText7 signing ใน background thread — ป้องกัน deadlock กับ ASP.NET
             var signedBytes = await Task.Run(() => SignPdfInternal(pdfBytes, pks, chain, request));
 
-            _logger.LogInformation("PDF signed. Doc={Doc}, Ref={Ref}, By={User}, Size={Size}",
+            _logger.LogInformation("PDF signed. Doc={Doc}, Ref={Ref}, By={User}, Size={Size}bytes",
                 request.DocumentName, request.ReferenceId, signerUsername, signedBytes.Length);
 
             return new PdfSignResult
@@ -95,7 +92,7 @@ public class PdfSignService : IPdfSignService
         }
     }
 
-    // ─── sync method ทำงานใน Task.Run — ไม่มี async ใดๆ ─────────────────────
+    // ─── sync method ทำงานใน Task.Run ────────────────────────────────────────
     private static byte[] SignPdfInternal(
         byte[]             pdfBytes,
         IExternalSignature pks,
@@ -103,9 +100,9 @@ public class PdfSignService : IPdfSignService
         PdfSignRequest     request)
     {
         var outputMs = new MemoryStream();
-
         try
         {
+            // ไม่ใช้ using กับ inputMs — PdfSigner จะ dispose ให้
             var inputMs = new MemoryStream(pdfBytes);
             var reader  = new PdfReader(inputMs);
             var signer  = new PdfSigner(reader, outputMs, new StampingProperties().UseAppendMode());
@@ -124,18 +121,8 @@ public class PdfSignService : IPdfSignService
             signer.SetFieldName($"Sig_{request.ReferenceId}_{DateTime.UtcNow:yyyyMMddHHmmss}");
             signer.SetCertificationLevel(PdfSigner.NOT_CERTIFIED);
 
-            try
-            {
-                signer.SignDetached(pks, chain, null, null, null, 0, PdfSigner.CryptoStandard.CMS);
-            }
-            catch (NullReferenceException)
-            {
-                // iText7 8.0.x bug: NullRef ใน internal cleanup หลัง sign สำเร็จ
-                // ตรวจจาก output size — ถ้าใหญ่กว่า input แสดงว่า sign สำเร็จแล้ว
-                if (outputMs.Length <= pdfBytes.Length)
-                    throw;
-                // signing สำเร็จ — ละเว้น NullRef จาก cleanup
-            }
+            // หลัง register BouncyCastleFactory ใน Program.cs แล้ว จะไม่มี NullRef อีก
+            signer.SignDetached(pks, chain, null, null, null, 0, PdfSigner.CryptoStandard.CMS);
 
             return outputMs.ToArray();
         }
