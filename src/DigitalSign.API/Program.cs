@@ -7,7 +7,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Serilog;
 
-_ = iText.Bouncycastleconnector.BouncyCastleFactoryCreator.GetFactory();
+// ── Force โหลด iText7 bouncy-castle-connector ────────────────────────────────
+// การอ้างถึง Type บังคับให้ assembly โหลดทันที
+// connector มี ModuleInitializer ที่ register BouncyCastleFactory อัตโนมัติ
+// ถ้าไม่ทำนี้ assembly จะโหลด lazy และ factory ไม่ถูก register ก่อน sign
+var connectorType = typeof(iText.Bouncycastleconnector.BouncyCastleFactoryCreator);
+System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(connectorType.TypeHandle);
+
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Serilog ───────────────────────────────────────────────────────────────────
@@ -20,13 +26,10 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Host.UseSerilog();
 
-// ── Windows Authentication (Kerberos / NTLM) ─────────────────────────────────
-// รองรับ Domain Login ของ @berninathailand.com อัตโนมัติ
-// User.Identity.Name จะได้ค่า BERNINATHAILAND\username
+// ── Windows Authentication ────────────────────────────────────────────────────
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
     .AddNegotiate();
 
-// บังคับ authenticate ทุก endpoint (ยกเว้นที่ระบุ [AllowAnonymous])
 builder.Services.AddAuthorization(options =>
 {
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
@@ -34,18 +37,17 @@ builder.Services.AddAuthorization(options =>
         .Build();
 });
 
-// ── Database (SQL Server) ─────────────────────────────────────────────────────
+// ── Database ──────────────────────────────────────────────────────────────────
 builder.Services.AddDbContext<DigitalSignDbContext>(opts =>
     opts.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"),
         x => x.MigrationsAssembly("DigitalSign.Data")));
 
-// ── Application Services ──────────────────────────────────────────────────────
-builder.Services.AddScoped<ICertificateService, CertificateService>();
-builder.Services.AddScoped<ISigningService,     SigningService>();
-builder.Services.AddScoped<IPdfSignService,     PdfSignService>();
+// ── Services ──────────────────────────────────────────────────────────────────
+builder.Services.AddScoped<ICertificateService,       CertificateService>();
+builder.Services.AddScoped<ISigningService,           SigningService>();
+builder.Services.AddScoped<IPdfSignService,           PdfSignService>();
 builder.Services.AddScoped<ISignatureAuditRepository, SignatureAuditRepository>();
 
-// ── Controllers ───────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
@@ -56,30 +58,23 @@ builder.Services.AddSwaggerGen(c =>
     {
         Title       = "BTDigitalSign API",
         Version     = "v1",
-        Description = "Digital Signature Web API — berninathailand.com (Windows SSO)",
-        Contact     = new OpenApiContact { Name = "BT Dev Team" }
+        Description = "Digital Signature Web API — berninathailand.com (Windows SSO)"
     });
 });
 
-// ── CORS (Intranet) ───────────────────────────────────────────────────────────
+// ── CORS ──────────────────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("IntranetPolicy", policy =>
     {
         var origins = builder.Configuration
-            .GetSection("Cors:AllowedOrigins")
-            .Get<string[]>() ?? ["http://localhost"];
-
-        policy.WithOrigins(origins)
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials(); // จำเป็นสำหรับ Windows Auth
+            .GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["http://localhost"];
+        policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
     });
 });
 
 var app = builder.Build();
 
-// ── Middleware Pipeline ───────────────────────────────────────────────────────
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -93,14 +88,10 @@ if (app.Environment.IsDevelopment())
 app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
 app.UseCors("IntranetPolicy");
-
-// Windows Auth ต้องมาก่อน Authorization เสมอ
 app.UseAuthentication();
 app.UseAuthorization();
-
 app.MapControllers();
 
-// Auto-migrate on startup
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<DigitalSignDbContext>();

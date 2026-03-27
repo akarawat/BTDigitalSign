@@ -9,17 +9,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Windows Authentication (Kerberos / NTLM / Domain SSO) -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="8.0.0" />
 
-    <!-- Swagger -->
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+    <!-- itext7.bouncy-castle-connector auto-registers BouncyCastleFactory on assembly load -->
+    <PackageReference Include="itext7.bouncy-castle-connector" Version="8.0.0" />
 
-    <!-- Logging -->
-    <PackageReference Include="Serilog.AspNetCore" Version="8.0.0" />
-    <PackageReference Include="Serilog.Sinks.Console" Version="5.0.0" />
-    <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
-       <PackageReference Include="itext7.bouncy-castle-connector" Version="8.0.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore"  Version="6.5.0" />
+    <PackageReference Include="Serilog.AspNetCore"      Version="8.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console"   Version="5.0.0" />
+    <PackageReference Include="Serilog.Sinks.File"      Version="5.0.0" />
   </ItemGroup>
 
   <ItemGroup>

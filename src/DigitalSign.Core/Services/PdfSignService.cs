@@ -13,7 +13,7 @@ using Org.BouncyCastle.Security;
 namespace DigitalSign.Core.Services;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Custom IExternalSignature — ใช้ .NET RSA โดยตรง ไม่ต้อง export private key
+// Custom IExternalSignature — ใช้ .NET RSA โดยตรง ไม่ export key เลย
 // ─────────────────────────────────────────────────────────────────────────────
 internal sealed class DotNetRsaSignature : IExternalSignature
 {
@@ -47,7 +47,7 @@ public class PdfSignService : IPdfSignService
         _logger      = logger;
     }
 
-    public async Task<PdfSignResult> SignPdfAsync(PdfSignRequest request, string signerUsername)
+    public Task<PdfSignResult> SignPdfAsync(PdfSignRequest request, string signerUsername)
     {
         try
         {
@@ -56,83 +56,70 @@ public class PdfSignService : IPdfSignService
             System.Security.Cryptography.X509Certificates.X509Certificate2 cert
                 = _certService.GetSigningCertificate(request.CertThumbprint);
 
-            var bcCert = DotNetUtilities.FromX509Certificate(cert);
-            IX509Certificate[] chain = [new X509CertificateBC(bcCert)];
-
+            // ใช้ RSA โดยตรง — ไม่ export key ใดๆ (CNG key ไม่รองรับ export)
+            // factory ถูก initialize แล้วใน Program.cs ผ่าน RunClassConstructor
             using RSA rsa = cert.GetRSAPrivateKey()
                 ?? throw new InvalidOperationException("Certificate has no RSA private key.");
 
-            IExternalSignature pks = new DotNetRsaSignature(rsa);
+            var bcCert = DotNetUtilities.FromX509Certificate(cert);
+            IX509Certificate[] chain = [new X509CertificateBC(bcCert)];
+            IExternalSignature  pks  = new DotNetRsaSignature(rsa);
 
-            // รัน iText7 signing ใน background thread — ป้องกัน deadlock กับ ASP.NET
-            var signedBytes = await Task.Run(() => SignPdfInternal(pdfBytes, pks, chain, request));
-
-            _logger.LogInformation("PDF signed. Doc={Doc}, Ref={Ref}, By={User}, Size={Size}bytes",
-                request.DocumentName, request.ReferenceId, signerUsername, signedBytes.Length);
-
-            return new PdfSignResult
+            var outputMs = new MemoryStream();
+            try
             {
-                IsSuccess    = true,
-                PdfBase64    = Convert.ToBase64String(signedBytes),
-                DocumentName = request.DocumentName,
-                ReferenceId  = request.ReferenceId,
-                SignedBy     = cert.Subject,
-                SignedAt     = DateTime.UtcNow
-            };
+                var inputMs = new MemoryStream(pdfBytes);
+                var reader  = new PdfReader(inputMs);
+                var signer  = new PdfSigner(reader, outputMs, new StampingProperties().UseAppendMode());
+
+                var appearance = signer.GetSignatureAppearance();
+                appearance
+                    .SetReason(request.Reason)
+                    .SetLocation(request.Location)
+                    .SetPageNumber(request.SignaturePage)
+                    .SetPageRect(new Rectangle(
+                        request.SignatureX,
+                        request.SignatureY,
+                        request.SignatureWidth,
+                        request.SignatureHeight));
+
+                signer.SetFieldName($"Sig_{request.ReferenceId}_{DateTime.UtcNow:yyyyMMddHHmmss}");
+                signer.SetCertificationLevel(PdfSigner.NOT_CERTIFIED);
+                signer.SignDetached(pks, chain, null, null, null, 0, PdfSigner.CryptoStandard.CMS);
+
+                var signedBytes = outputMs.ToArray();
+
+                _logger.LogInformation("PDF signed. Doc={Doc}, Ref={Ref}, By={User}, Size={Size}bytes",
+                    request.DocumentName, request.ReferenceId, signerUsername, signedBytes.Length);
+
+                return Task.FromResult(new PdfSignResult
+                {
+                    IsSuccess    = true,
+                    PdfBase64    = Convert.ToBase64String(signedBytes),
+                    DocumentName = request.DocumentName,
+                    ReferenceId  = request.ReferenceId,
+                    SignedBy     = cert.Subject,
+                    SignedAt     = DateTime.UtcNow
+                });
+            }
+            finally
+            {
+                outputMs.Dispose();
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "PDF signing failed. Ref={Ref}", request.ReferenceId);
-            return new PdfSignResult
+            return Task.FromResult(new PdfSignResult
             {
                 IsSuccess    = false,
                 ReferenceId  = request.ReferenceId,
                 ErrorMessage = ex.Message
-            };
+            });
         }
     }
 
-    // ─── sync method ทำงานใน Task.Run ────────────────────────────────────────
-    private static byte[] SignPdfInternal(
-        byte[]             pdfBytes,
-        IExternalSignature pks,
-        IX509Certificate[] chain,
-        PdfSignRequest     request)
-    {
-        var outputMs = new MemoryStream();
-        try
-        {
-            // ไม่ใช้ using กับ inputMs — PdfSigner จะ dispose ให้
-            var inputMs = new MemoryStream(pdfBytes);
-            var reader  = new PdfReader(inputMs);
-            var signer  = new PdfSigner(reader, outputMs, new StampingProperties().UseAppendMode());
-
-            var appearance = signer.GetSignatureAppearance();
-            appearance
-                .SetReason(request.Reason)
-                .SetLocation(request.Location)
-                .SetPageNumber(request.SignaturePage)
-                .SetPageRect(new Rectangle(
-                    request.SignatureX,
-                    request.SignatureY,
-                    request.SignatureWidth,
-                    request.SignatureHeight));
-
-            signer.SetFieldName($"Sig_{request.ReferenceId}_{DateTime.UtcNow:yyyyMMddHHmmss}");
-            signer.SetCertificationLevel(PdfSigner.NOT_CERTIFIED);
-
-            // หลัง register BouncyCastleFactory ใน Program.cs แล้ว จะไม่มี NullRef อีก
-            signer.SignDetached(pks, chain, null, null, null, 0, PdfSigner.CryptoStandard.CMS);
-
-            return outputMs.ToArray();
-        }
-        finally
-        {
-            outputMs.Dispose();
-        }
-    }
-
-    public async Task<VerifyResult> VerifyPdfSignatureAsync(string pdfBase64)
+    public Task<VerifyResult> VerifyPdfSignatureAsync(string pdfBase64)
     {
         try
         {
@@ -146,12 +133,12 @@ public class PdfSignService : IPdfSignService
             var sigNames = signUtil.GetSignatureNames();
 
             if (sigNames.Count == 0)
-                return new VerifyResult
+                return Task.FromResult(new VerifyResult
                 {
                     IsSignatureValid = false,
                     ErrorMessage     = "No digital signatures found in this PDF.",
                     VerifiedAt       = DateTime.UtcNow
-                };
+                });
 
             var  sigName  = sigNames[0];
             var  pkcs7    = signUtil.ReadSignatureData(sigName);
@@ -168,24 +155,24 @@ public class PdfSignService : IPdfSignService
                 "PDF verify: Sig={Name}, SigOK={SigValid}, CertOK={CertValid}, By={By}",
                 sigName, sigValid, certValid, signedBy);
 
-            return new VerifyResult
+            return Task.FromResult(new VerifyResult
             {
                 IsSignatureValid   = sigValid,
                 IsCertificateValid = certValid,
                 SignedBy           = signedBy,
                 CertExpiry         = certExpiry,
                 VerifiedAt         = DateTime.UtcNow
-            };
+            });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "PDF verify failed.");
-            return new VerifyResult
+            return Task.FromResult(new VerifyResult
             {
                 IsSignatureValid = false,
                 ErrorMessage     = ex.Message,
                 VerifiedAt       = DateTime.UtcNow
-            };
+            });
         }
     }
 }
