@@ -8,13 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- itext7 (AGPL) — รองรับ PDF Digital Signature บน .NET 8 -->
+    <!-- itext7 core -->
+    <PackageReference Include="itext7"                        Version="8.0.0" />
+    <!-- *** package นี้จำเป็น — มี PrivateKeyBC, X509CertificateBC, DotNetUtilities *** -->
+    <PackageReference Include="itext7.bouncy-castle-adapter" Version="8.0.0" />
 
-    <PackageReference Include="itext7" Version="8.0.0" />
-
-    <PackageReference Include="itext7.commons" Version="8.0.0" />
-
-    <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options"              Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
   </ItemGroup>
 

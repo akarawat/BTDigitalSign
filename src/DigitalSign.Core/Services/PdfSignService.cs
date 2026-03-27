@@ -1,7 +1,10 @@
+using System.Security.Cryptography;                    // RSA, GetRSAPrivateKey()
+using System.Security.Cryptography.X509Certificates;  // X509Certificate2
+
 using DigitalSign.Core.Models;
-using iText.Bouncycastle.Crypto;        // PrivateKeyBC  (iText.Bouncycastle.Crypto namespace)
+using iText.Bouncycastle.Crypto;        // PrivateKeyBC
 using iText.Bouncycastle.X509;         // X509CertificateBC
-using iText.Commons.Bouncycastle.Cert; // IX509Certificate (interface)
+using iText.Commons.Bouncycastle.Cert; // IX509Certificate
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
 using iText.Signatures;
@@ -35,14 +38,19 @@ public class PdfSignService : IPdfSignService
         try
         {
             var pdfBytes = Convert.FromBase64String(request.PdfBase64);
-            var cert     = _certService.GetSigningCertificate(request.CertThumbprint);
 
-            // .NET X509Certificate2 → BouncyCastle AsymmetricKeyParameter
-            var bcCert     = DotNetUtilities.FromX509Certificate(cert);
-            var privateKey = DotNetUtilities.GetKeyPair(cert.GetRSAPrivateKey()!).Private;
-            // AsymmetricKeyParameter implements ICipherParameters → PrivateKeyBC รับได้ทันที
+            // ระบุ type ชัดเจนเพื่อหลีกเลี่ยง namespace conflict กับ iText.Bouncycastle.X509
+            System.Security.Cryptography.X509Certificates.X509Certificate2 cert
+                = _certService.GetSigningCertificate(request.CertThumbprint);
 
-            // PrivateKeyBC อยู่ใน namespace iText.Bouncycastle.Crypto (verified จาก iText7 8.0.0 source)
+            // .NET X509Certificate2 → BouncyCastle
+            var bcCert = DotNetUtilities.FromX509Certificate(cert);
+
+            // ดึง RSA private key — ต้องมี using System.Security.Cryptography จึงเจอ method นี้
+            using RSA rsa        = cert.GetRSAPrivateKey()
+                ?? throw new InvalidOperationException("Certificate has no RSA private key.");
+            var privateKey       = DotNetUtilities.GetKeyPair(rsa).Private;
+
             IExternalSignature pks   = new PrivateKeySignature(new PrivateKeyBC(privateKey), DigestAlgorithms.SHA256);
             IX509Certificate[] chain = [new X509CertificateBC(bcCert)];
 
@@ -120,9 +128,8 @@ public class PdfSignService : IPdfSignService
             var  pkcs7    = signUtil.ReadSignatureData(sigName);
             bool sigValid = pkcs7.VerifySignatureIntegrityAndAuthenticity();
 
-            // IX509Certificate ไม่มี NotAfter / IsValid / SubjectDN โดยตรง
-            // → cast เป็น X509CertificateBC แล้วดึง Org.BouncyCastle.X509.X509Certificate
-            //   ซึ่งมี .NotAfter (property), .IsValid(DateTime), .SubjectDN (property)
+            // cast IX509Certificate → X509CertificateBC → Org.BouncyCastle.X509.X509Certificate
+            // เพื่อเข้าถึง .NotAfter, .IsValid(), .SubjectDN
             var signerCertI = pkcs7.GetSigningCertificate();
             var bcX509      = ((X509CertificateBC)signerCertI).GetCertificate();
 
