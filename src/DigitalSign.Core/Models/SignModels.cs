@@ -35,21 +35,14 @@ public class VerifyRequest
 
 public class PdfSignRequest
 {
-    [Required]
-    public string PdfBase64 { get; set; } = string.Empty;
-
-    [Required]
-    public string DocumentName { get; set; } = string.Empty;
-
-    [Required]
-    public string ReferenceId { get; set; } = string.Empty;
-
+    [Required] public string PdfBase64 { get; set; } = string.Empty;
+    [Required] public string DocumentName { get; set; } = string.Empty;
+    [Required] public string ReferenceId { get; set; } = string.Empty;
     public string? CertThumbprint { get; set; }
     public string Reason { get; set; } = "Approved";
     public string Location { get; set; } = "Bangkok, Thailand";
+    public string? SignerUsername { get; set; } // ← username จาก Web App (Double-Hop fix)
     public int SignaturePage { get; set; } = 1;
-
-    // ตำแหน่ง signature บน PDF (points, bottom-left origin)
     public float SignatureX { get; set; } = 36f;
     public float SignatureY { get; set; } = 36f;
     public float SignatureWidth { get; set; } = 200f;
