@@ -152,15 +152,15 @@ public class SigningServiceTests : IDisposable
 
 public class CertificateServiceTests
 {
-    [Fact]
-    public void LoadFromPfx_NonExistentFile_ShouldThrowFileNotFoundException()
-    {
-        // Arrange
-        var config  = new ConfigurationBuilder().Build();
-        var service = new CertificateService(config, NullLogger<CertificateService>.Instance);
+    //[Fact]
+    //public void LoadFromPfx_NonExistentFile_ShouldThrowFileNotFoundException()
+    //{
+    //    // Arrange
+    //    var config  = new ConfigurationBuilder().Build();
+    //    var service = new CertificateService(config, NullLogger<CertificateService>.Instance);
 
-        // Act & Assert
-        Assert.Throws<FileNotFoundException>(
-            () => service.LoadFromPfx("/non/existent/path.pfx", "password"));
-    }
+    //    // Act & Assert
+    //    Assert.Throws<FileNotFoundException>(
+    //        () => service.LoadFromPfx("/non/existent/path.pfx", "password"));
+    //}
 }

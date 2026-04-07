@@ -1,4 +1,5 @@
 <Solution>
+  <Folder Name="/RenewCertify/" />
   <Folder Name="/src/">
     <Project Path="src/DigitalSign.API/DigitalSign.API.csproj" />
     <Project Path="src/DigitalSign.Core/DigitalSign.Core.csproj" />
