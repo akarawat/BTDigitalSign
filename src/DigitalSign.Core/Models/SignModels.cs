@@ -3,7 +3,6 @@ using System.ComponentModel.DataAnnotations;
 namespace DigitalSign.Core.Models;
 
 // ── Request Models ────────────────────────────────────────────────────────────
-
 public class SignRequest
 {
     [Required]
@@ -47,6 +46,11 @@ public class PdfSignRequest
     public float SignatureY { get; set; } = 36f;
     public float SignatureWidth { get; set; } = 200f;
     public float SignatureHeight { get; set; } = 60f;
+    public string? SignerFullName { get; set; }  // "Sakulchai Panwilai"
+    public string? SignerRole { get; set; }  // "Reviewer"
+    public string? WebSource { get; set; }  // "bt_qc-d.berninathailand.com"
+    public string? DocumentType { get; set; }  // "WorkInstruction"
+
 }
 
 public class TokenRequest
