@@ -47,6 +47,7 @@ builder.Services.AddScoped<ICertificateService,       CertificateService>();
 builder.Services.AddScoped<ISigningService,           SigningService>();
 builder.Services.AddScoped<IPdfSignService,           PdfSignService>();
 builder.Services.AddScoped<ISignatureAuditRepository, SignatureAuditRepository>();
+builder.Services.AddScoped<ISignatureRegistryRepository, SignatureRegistryRepository>();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

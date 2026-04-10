@@ -10,35 +10,52 @@ public class DigitalSignDbContext : DbContext
 
     public DbSet<SignatureAudit>    SignatureAudits    { get; set; }
     public DbSet<SignatureTemplate> SignatureTemplates { get; set; }
+    public DbSet<SignatureRegistry> SignatureRegistries { get; set; }  // ← เพิ่มใหม่
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
+        // ── SignatureAudit ─────────────────────────────────────────────────────
         modelBuilder.Entity<SignatureAudit>(e =>
         {
-            e.HasIndex(x => x.ReferenceId).HasDatabaseName("IX_SignAudit_ReferenceId");
+            e.HasIndex(x => x.ReferenceId) .HasDatabaseName("IX_SignAudit_ReferenceId");
             e.HasIndex(x => x.SignedByUser).HasDatabaseName("IX_SignAudit_SignedByUser");
-            e.HasIndex(x => x.SignedAt).HasDatabaseName("IX_SignAudit_SignedAt");
+            e.HasIndex(x => x.SignedAt)    .HasDatabaseName("IX_SignAudit_SignedAt");
             e.HasIndex(x => x.CertThumbprint).HasDatabaseName("IX_SignAudit_Thumbprint");
             e.Property(x => x.SignedAt).HasDefaultValueSql("GETUTCDATE()");
         });
 
-        // Seed: default template
+        // ── SignatureRegistry ──────────────────────────────────────────────────
+        modelBuilder.Entity<SignatureRegistry>(e =>
+        {
+            // Unique index เฉพาะ record ที่ IsActive = true
+            e.HasIndex(x => x.SamAccountName)
+             .HasFilter("[IsActive] = 1")
+             .IsUnique()
+             .HasDatabaseName("IX_SignatureRegistry_SamAccount");
+
+            e.HasIndex(x => new { x.IsApproved, x.IsActive })
+             .HasDatabaseName("IX_SignatureRegistry_Status");
+
+            e.Property(x => x.RegisteredAt).HasDefaultValueSql("GETUTCDATE()");
+        });
+
+        // ── Seed: Default Template ─────────────────────────────────────────────
         modelBuilder.Entity<SignatureTemplate>().HasData(
             new SignatureTemplate
             {
-                Id              = 1,
-                Name            = "Default Bottom-Left",
-                Description     = "Standard signature position at bottom-left of page 1",
-                SignatureX      = 36f,
-                SignatureY      = 36f,
-                SignatureWidth  = 200f,
+                Id            = 1,
+                Name          = "Default Bottom-Left",
+                Description   = "Standard signature position at bottom-left of page 1",
+                SignatureX    = 36f,
+                SignatureY    = 36f,
+                SignatureWidth = 200f,
                 SignatureHeight = 60f,
-                SignaturePage   = 1,
-                DefaultReason   = "Approved",
-                IsActive        = true,
-                CreatedAt       = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                SignaturePage = 1,
+                DefaultReason = "Approved",
+                IsActive      = true,
+                CreatedAt     = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             });
     }
 }

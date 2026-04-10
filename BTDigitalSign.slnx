@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/RenewCertify/" />
   <Folder Name="/src/">
+    <File Path="src/DigitalSign.API/DbContextAddition.cs" />
     <Project Path="src/DigitalSign.API/DigitalSign.API.csproj" />
     <Project Path="src/DigitalSign.Core/DigitalSign.Core.csproj" />
     <Project Path="src/DigitalSign.Data/DigitalSign.Data.csproj" />
