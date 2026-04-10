@@ -55,7 +55,7 @@ public class SignatureRegistryRepository : ISignatureRegistryRepository
                 ApprovedAt     = x.ApprovedAt,
                 RegisteredAt   = x.RegisteredAt,
                 UpdatedAt      = x.UpdatedAt,
-                SignatureImage = []  // ไม่โหลดมา
+                SignatureImage = Array.Empty<byte>()  // ไม่โหลดมา
             })
             .ToListAsync();
     }
